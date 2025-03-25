@@ -14,7 +14,7 @@ def chunk_fasta(fasta, out_dir, chunk_size):
     with open(fasta) as handle:
         for record in SeqIO.parse(handle, "fasta"):
             #print(record.id)
-            if count > chunk_size:
+            if count > chunk_size + 1:
                 chunk.close()
                 count = 0
                 chunk_number += 1
