@@ -95,18 +95,15 @@ process alignChunks {
     
     maxForks diamond_processes    
 
-    script:
-    """
-    echo ${myChunk}
-    // chunk_name=`basename(${myChunk})`
-    // echo "\\\$chunk_name"
-    // mkdir -p ${out_dir}/diamond_out
-    
-    // ${diamond_path} blastp -d '${database}' -q '${myChunk}' -out_fmt 6 -o "${out_dir}/diamond_out/diamond_out_${chunk_name}.outfmt6.tsv" --threads '${params.threads}'
-    """
+    shell:
+    '''
+    mkdir -p !{out_dir}/diamond_out
+    !{diamond_path} blastp -d !{database} -q !{myChunk} --outfmt 6 --threads !{params.threads} > diamond_out_!{myChunk}.outfmt6.tsv
+    '''
 }
 
 workflow {
+    // !{out_dir}/diamond_out/diamond_out_${chunk_name}.outfmt6.tsv
     //println "Database path: ${params.database}"
     println "${simul_processes}"
     input_fasta = file(params.input_fasta) 
