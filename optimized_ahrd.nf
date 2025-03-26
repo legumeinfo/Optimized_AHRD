@@ -6,16 +6,22 @@ params.outdir = ''
 params.chunksize = 500
 params.database = ''
 params.maximum_processes = 128
-params.threads = 4 
+params.threads = 4
+params.interproscan_path = ''
+params.diamond_path = '' 
 simul_processes = params.maximum_processes / params.threads
 diamond_processes = simul_processes / 2
 interpro_processes = simul_processes / 2
+
+// println file(params.diamond_path).getBaseName()
 
 check_params()
 
 assert params.database != ''
 assert params.input_fasta != ''
 assert params.outdir != ''
+assert params.interproscan_path != ''
+assert params.diamond_path != ''
 
 def check_params() {
     if( params.remove('help') ) {
@@ -27,8 +33,6 @@ def check_params() {
 
 process chunkFasta {
     tag { fasta }
-    
-    publishDir "${params.outdir}", mode: 'copy', overwrite: true 
 
     input:
     path input_fasta
@@ -62,37 +66,43 @@ process interproscan {
     
     input:
     path myChunk
-    
+    path out_dir
+    val interproscan_path 
+
     output:
-    path "interproscan_out/*.tsv"
+    path "${out_dir}/interproscan_out/*.tsv"
 
     maxForks interpro_processes
 
     script:
     """
-    mkdir -p "interproscan_out"
-
-    /falafel/legumeinfo/sw/interproscan-5.72-103.0/interproscan.sh -i $myChunk -o interproscan_out/${myChunk}.tsv -f tsv
+    mkdir -p ${out_dir}/interproscan_out
+    ${interproscan_path} -i $myChunk -o ${out_dir}/interproscan_out/${myChunk}.tsv -f tsv
     """
 }
 
 process alignChunks {
-    tag "${chunk}"
+    tag "${myChunk}"
 
     input: 
-    path chunk
+    path myChunk
+    path out_dir
     val database
+    val diamond_path
 
     output:
-    path "diamond_out_${chunk}.txt"
+    path "${out_dir}/diamond_out/*.outfmt6.tsv"
     
     maxForks diamond_processes    
 
     script:
     """
-    export PATH=/home/elavelle/software:\$PATH
-
-    diamond blastp -d '${database}' -q '${chunk}' -o 'diamond_out_${chunk}.txt' --threads '${params.threads}'
+    echo ${myChunk}
+    // chunk_name=`basename(${myChunk})`
+    // echo "\\\$chunk_name"
+    // mkdir -p ${out_dir}/diamond_out
+    
+    // ${diamond_path} blastp -d '${database}' -q '${myChunk}' -out_fmt 6 -o "${out_dir}/diamond_out/diamond_out_${chunk_name}.outfmt6.tsv" --threads '${params.threads}'
     """
 }
 
@@ -100,7 +110,8 @@ workflow {
     //println "Database path: ${params.database}"
     println "${simul_processes}"
     input_fasta = file(params.input_fasta) 
-    out_dir = params.outdir
+    out_dir = file(params.outdir)
+    out_dir.mkdirs()
     chunk_size = params.chunksize
     chunks = chunkFasta(input_fasta, out_dir, chunk_size)
     clean_chunks = sanitize_fasta(chunks)
@@ -111,8 +122,8 @@ workflow {
     database_channel = Channel.value(params.database)
   
     chunk_channel.set { chunk_files }
-        interproscan(chunk_files)
-        alignChunks(chunk_files, database_channel)
+        interproscan(chunk_files, out_dir, params.interproscan_path)
+        alignChunks(chunk_files, out_dir, database_channel, params.diamond_path)
     
     //alignChunks(chunk_channel, database_channel) 
 }
