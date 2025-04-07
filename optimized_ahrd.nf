@@ -49,6 +49,8 @@ process chunkFasta {
 }
 
 process sanitize_fasta {
+    tag "fasta sanitization"
+
     input:
     path fasta_chunk
 
@@ -62,7 +64,7 @@ process sanitize_fasta {
 }
 
 process interproscan {
-    tag "${myChunk}"
+    tag "interproscan"
     
     input:
     path myChunk
@@ -70,7 +72,7 @@ process interproscan {
     val interproscan_path 
 
     output:
-    path "${out_dir}/interproscan_out/*.tsv"
+    path "${out_dir}/interproscan_out/${myChunk}.tsv"
 
     maxForks interpro_processes
 
@@ -82,7 +84,7 @@ process interproscan {
 }
 
 process alignChunks {
-    tag "${myChunk}"
+    tag "diamond"
 
     input: 
     path myChunk
@@ -91,20 +93,90 @@ process alignChunks {
     val diamond_path
 
     output:
-    path "${out_dir}/diamond_out/*.outfmt6.tsv"
+    path "${out_dir}/diamond_out/diamond_out_${myChunk}.outfmt6.tsv", emit: chunk_out
     
     maxForks diamond_processes    
 
     shell:
     '''
     mkdir -p !{out_dir}/diamond_out
-    !{diamond_path} blastp -d !{database} -q !{myChunk} --outfmt 6 --threads !{params.threads} > diamond_out_!{myChunk}.outfmt6.tsv
+    !{diamond_path} blastp -d !{database} -q !{myChunk} --outfmt 6 --threads !{params.threads} > !{out_dir}/diamond_out/diamond_out_!{myChunk}.outfmt6.tsv
     '''
 }
 
+process concatenate_diamond_outputs {
+    tag "concat diamonds"
+
+    input:
+    path diamond_cat_in
+    path out_dir
+
+    output:
+    path "${out_dir}/diamond_concatenated.outfmt6.tsv"
+
+    script:
+    """
+    cat ${diamond_cat_in} > ${out_dir}/diamond_concatenated.outfmt6.tsv
+    """
+}
+
+process concatenate_interproscan_outputs {
+    tag "concat interproscans"
+
+    input:
+    path interproscan_in
+    path out_dir
+
+    output:
+    path "${out_dir}/interproscan_concatenated.tsv"
+
+    script:
+    """
+    cat ${interproscan_in} > ${out_dir}/interproscan_concatenated.tsv
+    """
+}
+
+process create_yaml {
+    tag "Generate yaml"
+    
+    input:
+    path proteins_fasta
+    path diamond_file
+    path interpro_result
+    path database
+    path out_dir
+
+    output:
+    path "${out_dir}/ahrd_config.yml"
+
+    script:
+    """
+    python ${projectDir}/scripts/make_yaml.py ${proteins_fasta} ${diamond_file} ${interpro_result} ${database} ${out_dir}
+    """
+}
+
+process run_ahrd{
+    tag "Run ahrd"
+
+    input:
+    path out_dir
+    path ahrd_config    
+
+    output:
+    path "${out_dir}/ahrd_interpro_output.csv"
+
+    script:
+    """
+    echo "" > blank1.txt
+    echo "" > blank2.txt
+    echo "" > blank3.txt
+
+    java -jar /home/elavelle/software/AHRD/dist/ahrd.jar ahrd_config.yml
+    cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
+    """
+}
+
 workflow {
-    // !{out_dir}/diamond_out/diamond_out_${chunk_name}.outfmt6.tsv
-    //println "Database path: ${params.database}"
     println "${simul_processes}"
     input_fasta = file(params.input_fasta) 
     out_dir = file(params.outdir)
@@ -118,9 +190,22 @@ workflow {
     
     database_channel = Channel.value(params.database)
   
-    chunk_channel.set { chunk_files }
-        interproscan(chunk_files, out_dir, params.interproscan_path)
-        alignChunks(chunk_files, out_dir, database_channel, params.diamond_path)
+    alignChunks(chunk_channel, out_dir, database_channel, params.diamond_path)
+        .collect()
+        .set { diamond_out_files }
     
-    //alignChunks(chunk_channel, database_channel) 
+    interproscan(chunk_channel, out_dir, params.interproscan_path)
+        .collect()
+        .set { interproscan_out_files }
+
+    interproscan_out_files.view()
+
+    diamond_cat = concatenate_diamond_outputs(diamond_out_files, out_dir)
+    interproscan_cat = concatenate_interproscan_outputs(interproscan_out_files, out_dir)    
+    
+    create_yaml(input_fasta, diamond_cat, interproscan_cat, params.database, out_dir)
+        .collect()
+        .set { ahrd_config }
+
+    run_ahrd(out_dir, ahrd_config)
 }
