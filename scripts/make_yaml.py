@@ -8,7 +8,7 @@ def create_yaml(proteins_fasta, diamond_cat, interpro_result, database, out_dir)
     out_yaml = os.path.join(out_dir, "ahrd_config.yml")
 
     data = {
-        'proteins_fasta': proteins_fasta,
+        'proteins_fasta': os.path.abspath(proteins_fasta),
         'token_score_bit_score_weight': 0.468,
         'token_score_database_score_weight': 0.2098,
         'token_score_overlap_score_weight': 0.3221,
@@ -17,15 +17,15 @@ def create_yaml(proteins_fasta, diamond_cat, interpro_result, database, out_dir)
             'diamond': {
                 'weight': 653,
                 'description_score_bit_score_weight': 2.717061,
-                'file': diamond_cat,
-                'database': database,  # Dynamically filled with the 'database' argument
+                'file': os.path.abspath(diamond_cat),
+                'database': os.path.abspath(database),  # Dynamically filled with the 'database' argument
                 'blacklist': 'blank1.txt',
                 'filter': 'blank2.txt',
                 'token_blacklist': 'blank3.txt',
-                'fasta_header_regex': '^>(?<accession>\\S+)\\s+(?<description>.+?)\\s+\\[(?<organism>.+?)\\]$'
+                'fasta_header_regex': '^>glyma\.Wm82\.gnm6\.ann1\.Glyma\.\d+G\d+\.\d+$'
             }
         },
-        'interpro_result': interpro_result
+        'interpro_result': os.path.abspath(interpro_result)
     }
 
     with open(out_yaml, 'w') as outfile:
