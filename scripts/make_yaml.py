@@ -18,11 +18,11 @@ def create_yaml(proteins_fasta, diamond_cat, interpro_result, database, out_dir)
                 'weight': 653,
                 'description_score_bit_score_weight': 2.717061,
                 'file': os.path.abspath(diamond_cat),
-                'database': os.path.abspath(database),  # Dynamically filled with the 'database' argument
+                'database': '/data/elavelle/databases/uniref90.fasta',  # Dynamically filled with the 'database' argument
                 'blacklist': 'blank1.txt',
                 'filter': 'blank2.txt',
                 'token_blacklist': 'blank3.txt',
-                'fasta_header_regex': '^>glyma\.Wm82\.gnm6\.ann1\.Glyma\.\d+G\d+\.\d+$'
+                'fasta_header_regex': '^>(?<accession>\S+)\s+(?<description>.+?)$'
             }
         },
         'interpro_result': os.path.abspath(interpro_result)

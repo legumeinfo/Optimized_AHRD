@@ -163,7 +163,7 @@ process run_ahrd{
     path ahrd_config    
 
     output:
-    path "${out_dir}/ahrd_interpro_output.csv"
+    path "ahrd_interpro_output.csv"
 
     script:
     """
