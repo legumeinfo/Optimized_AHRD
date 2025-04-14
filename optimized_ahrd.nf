@@ -28,6 +28,10 @@ def check_params() {
         params.each{ k, v -> println "params.${k.padRight(25)} = ${v}" }
         exit 0
     }
+    if (!new File(params.outdir).isAbsolute()) {
+        params.outdir = "$PWD/${params.outdir}"
+        println "INFO: outdir converted to absolute path: ${params.outdir}"
+    }
     // additional validation here
 }
 
