@@ -40,12 +40,14 @@ def create_yaml(proteins_fasta, out_dir, db_tuples_json):
     with open(db_tuples_json) as f:
         db_tuples = json.load(f)
     blast_dbs = populate_blast_dbs(db_tuples)
+    gene_ontology_regex = r"/data/elavelle/databases/goa_uniprot_all.gaf"
+    reference_go_reges = r"^UniProtKB\s+(?<shortAccession>\S+)\s+\S+\s+\S+\s+(?<goTerm>GO:\d{7})"
     raw = f"{out_dir}/interproscan_concatenated.raw"
     data = {
         "interpro_database": "/data/elavelle/databases/interpro.xml",
         "interpro_result": os.path.abspath(raw),
-        "gene_ontology_result": r"/data/elavelle/databases/goa_uniprot_all.gaf",
-        "reference_go_regex": r"^UniProtKB\s+(?<shortAccession>\S+)\s+\S+\s+\S+\s+(?<goTerm>GO:\d{7})",
+        "gene_ontology_result": gene_ontology_regex,
+        "reference_go_regex": reference_go_reges,
         "proteins_fasta": os.path.abspath(proteins_fasta),
         "token_score_bit_score_weight": 0.468,
         "token_score_database_score_weight": 0.2098,
