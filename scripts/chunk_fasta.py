@@ -8,12 +8,12 @@ def chunk_fasta(fasta, out_dir, chunk_size):
     count = 1
     chunk_number = 1
     out_dir = os.path.abspath(out_dir)
-    os.makedirs(f"{out_dir}/chunks", exist_ok = True)
-    
+    os.makedirs(f"{out_dir}/chunks", exist_ok=True)
+
     chunk = open(f"{out_dir}/chunks/{chunk_number}.fasta", "w")
     with open(fasta) as handle:
         for record in SeqIO.parse(handle, "fasta"):
-            #print(record.id)
+            # print(record.id)
             if count > chunk_size:
                 chunk.close()
                 count = 0
