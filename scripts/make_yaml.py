@@ -3,22 +3,24 @@ import argparse
 import os
 import json
 import argparse
+from pathlib import Path
 
-def create_yaml(proteins_fasta, interpro_result, db_tuples_json):
+def create_yaml(proteins_fasta, out_dir, db_tuples_json):
     out_yaml = os.path.join("ahrd_config.yml")
-
-    db_tuples = json.loads(db_tuples_json)
-
+    with open(db_tuples_json) as f:
+        db_tuples = json.load(f)
+    #db_tuples = json.loads(db_tuples_json)
+    
     # Generalized regex, may need changing based on .fasta headers
-    fasta_regex = r'^>(?<accession>\S+)\s+(?<description>.+?)(?=\s(?:n=|OS=)|$)'
+    # fasta_regex = r'^>(?<accession>\S+)\s+(?<description>.+?)(?=\s(?:n=|OS=)|$)'
 
     blast_dbs = {}
     for db_tuple in db_tuples:
         db_name = db_tuple["dbName"]
-        diamond_result = db_tuple["blastFile"]
+        diamond_result = db_tuple["blast_file"]
         db_path = db_tuple["dbPath"]
 
-        blast_dbs[db_name] = {
+        db_section = {
             'weight': 653,
             'description_score_bit_score_weight': 2.717061,
             'file': os.path.abspath(diamond_result),
@@ -31,10 +33,15 @@ def create_yaml(proteins_fasta, interpro_result, db_tuples_json):
         if db_name.lower() == "uniref90":
             db_section["fasta_header_regex"] = r"^>(?<accession>UniRef90_\S+)\s+(?<description>.+?)(?=\s(?:n=|OS=)|$)"
             db_section["short_accession_regex"] = r"UniRef90_(?<shortAccession>[A-Z0-9]+)"
+        elif db_name.lower() in ["trembl", "swissprot"]:
+            db_section["fasta_header_regex"] = r"^>(?<accession>\S+)\s+(?<description>.+)"
+            db_section["short_accession_regex"] = r"^\w+\|(?<shortAccession>\w+)\|"
 
+        blast_dbs[db_name] = db_section
 
     data = {
-        'interpro_result': os.path.abspath(interpro_result),
+        'interpro_database': '/data/elavelle/databases/interpro.xml', 
+        'interpro_result' : os.path.abspath(os.path.join(out_dir, 'interproscan_concatenated.raw')),
         'gene_ontology_result': '/data/elavelle/databases/goa_uniprot_all.gaf',
         'reference_go_regex': '^UniProtKB\s+(?<shortAccession>\S+)\s+\S+\s+\S+\s+(?<goTerm>GO:\d{7})',
         'proteins_fasta': os.path.abspath(proteins_fasta),
@@ -51,9 +58,9 @@ def create_yaml(proteins_fasta, interpro_result, db_tuples_json):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a YAML file for ahrd to run")
     parser.add_argument('proteins_fasta', type=str, help="Path to the proteins FASTA file")
-    parser.add_argument('interpro_result', type=str, help="Path to the concatenated InterProScan result")
+    parser.add_argument('out_dir', type=str, help="Out directory")
     parser.add_argument('db_tuples_json', type=str, help="JSON string: [(dbName, diamond_output_file, dbPath), ...]")
 
     args = parser.parse_args()
 
-    create_yaml(args.proteins_fasta, args.interpro_result, args.db_tuples_json)
+    create_yaml(args.proteins_fasta, args.out_dir, args.db_tuples_json)

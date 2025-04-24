@@ -17,9 +17,6 @@ assert params.interproscan_path != ''
 assert params.diamond_path != ''
 assert !params.databases.isEmpty(), "No database/s provided"
 
-// Janky boolean to supress redundant warnings b/c nothing, NOTHING, else works
-def interproscan_warning_shown = false
-
 def check_params() {
     if( params.remove('help') ) {
         params.each{ k, v -> println "params.${k.padRight(25)} = ${v}" }
@@ -94,15 +91,31 @@ process interproscan {
     tuple path(myChunk), path(out_dir), val(interproscan_path)
 
     output:
-    path "${out_dir}/interproscan_out/${myChunk}.tsv",
-    path "${out_dir}/interproscan_out/${myChunk}.xml"
+    path "${out_dir}/interproscan_out/${myChunk}.raw"
 
     maxForks interpro_processes
 
     script:
     """
     mkdir -p ${out_dir}/interproscan_out
-    ${interproscan_path} -i $myChunk -o ${out_dir}/interproscan_out/${myChunk}
+    ${interproscan_path} -i $myChunk -f XML -o ${out_dir}/interproscan_out/${myChunk}.xml
+    ${interproscan_path} -mode convert -f RAW -i ${out_dir}/interproscan_out/${myChunk}.xml -b ${out_dir}/interproscan_out/${myChunk}
+    """
+}
+
+process concatenate_interproscan {
+    tag "concatenate raw ips files"
+
+    input:
+    path raw_files
+    path out_dir
+
+    output:
+    path "${out_dir}/interproscan_concatenated.raw"
+
+    script:
+    """
+    cat ${raw_files} > ${out_dir}/interproscan_concatenated.raw
     """
 }
 
@@ -127,7 +140,7 @@ process checkOutputExists {
     fi
     """
 }
-
+//Currently not in use, functionality to check chunks (vs. concatenated file) to skip
 process checkInterProExists {
     input:
     path out_dir
@@ -138,56 +151,13 @@ process checkInterProExists {
 
     script:
     def chunk_name = input_fasta.name
-    def out_file = "${out_dir}/interproscan_out/${chunk_name}.tsv"
+    def out_file = "${out_dir}/interproscan_out/${chunk_name}.xml"
     """
     if [ -f "${out_file}" ]; then
         echo "true" > IPSexists.txt
     else
         echo "false" > IPSexists.txt
     fi
-    """
-}
-
-process concatenate_interproscan_outputs {
-    tag "concat interproscans"
-
-    input:
-    path interproscan_in
-    path out_dir
-
-    output:
-    path "${out_dir}/interproscan_concatenated.tsv", emit: interproscan_file
-
-    script:
-    """
-    cat ${interproscan_in} > ${out_dir}/interproscan_concatenated.tsv
-    """
-}
-
-process concatenate_interproscan_xml {
-    tag "concatenate XMLs"
-
-    input:
-    path xml_files
-
-    output:
-    path "interproscan_concatenated.xml"
-
-    script:
-    """
-    echo "<interproscan>" > interproscan_concatenated.xml
-
-    for file in ${xml_files.join(' ')}; do
-        awk '
-            BEGIN { skip = 0 }
-            /^<\\?xml/ { next }
-            /^<interproscan>/ { skip = 1; next }
-            /^<\\/interproscan>/ { skip = 0; next }
-            skip == 0 { print }
-        ' \$file >> interproscan_concatenated.xml
-    done
-
-    echo "</interproscan>" >> interproscan_concatenated.xml
     """
 }
 
@@ -205,7 +175,6 @@ process alignChunks {
     script:
     """
     mkdir -p ${out_dir}/diamond_out/${database_name}
-    echo "Out dir is: ${out_dir}"
     ${diamond_path} blastp -d ${database_index} -q ${myChunk} --outfmt 6 --threads ${params.threads} > ${out_dir}/diamond_out/${database_name}/${myChunk.getBaseName()}.outfmt6.tsv
     """
 }
@@ -215,7 +184,7 @@ process concatenate_diamond_outputs {
 
     input:
     tuple path(diamond_in), path(out_dir), val(database_name), val(database_path)
-
+    
     output:
     tuple path("${out_dir}/${database_name}_blasted.outfmt6.tsv"), val(database_name), val(database_path), emit: concatenated_files
 
@@ -229,14 +198,15 @@ process create_yaml {
     tag "Generate yaml"
     
     input:
-    tuple path(fasta), path(interpro_result), val(db_json), path(out_dir)
+    path fasta
+    path out_dir
 
     output:
     path "${out_dir}/ahrd_config.yml"
 
     script:
     """
-    python ${projectDir}/scripts/make_yaml.py ${fasta} ${interpro_result} '${db_json}'
+    python ${projectDir}/scripts/make_yaml.py ${fasta} ${out_dir} ${out_dir}/diamond_info.json
     
     cp ahrd_config.yml ${out_dir}/ahrd_config.yml
     """
@@ -257,7 +227,8 @@ process run_ahrd{
     echo "" > blank1.txt
     echo "" > blank2.txt
     echo "" > blank3.txt
-
+    
+    ln -s /data/elavelle/databases/interpro.dtd
     java -jar /home/elavelle/software/AHRD/dist/ahrd.jar ahrd_config.yml
     cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
     """
@@ -270,6 +241,7 @@ workflow {
 
     chunk_size = params.chunksize
     def databases_map = load_database_csv(params.databases)
+    log.info "LOADED DATABASES: ${databases_map}"
 
     chunks = chunkFasta(input_fasta, out_dir, chunk_size)
     clean_chunks = sanitize_fasta(chunks)
@@ -295,28 +267,27 @@ workflow {
             tuple(dbName, dbPath, dbIndex)
         }
         .set { dbs_to_process }
-    
+    dbs_to_process.view { "DB TO PROCESS DEBUG: $it" }
+ 
     // Check if interproscan concatenated output already exists
-    interproscan_result = file("${out_dir}/interproscan_concatenated.tsv")
+    interproscan_result = file("${out_dir}/interproscan_concatenated.raw")
     if (interproscan_result.exists()) {
-        if (!interproscan_warning_shown) {    
-            log.warn("${out_dir}/interproscan_concatenated.tsv already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
-            interproscan_warning_shown = true
-        }
-
+        log.warn("${out_dir}/interproscan_concatenated.raw already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
         // Create a channel with the existing file
-        interproscan_file_ch = Channel.value(interproscan_result)
+        interproscan_file_ch = Channel.value(file(interproscan_result))
     } else {
-        // Run interproscan and concatenate results
+        // Run interproscan
         chunk_channel
             .map { chunk -> tuple(chunk, out_dir, params.interproscan_path) }
             .set { interproscan_input }
-
+        //overwrite
         interproscan(interproscan_input)
-            .collect()
-            .set { interproscan_outputs }
+            //.raw_file
+            //.collect()
+            .set { interproscan_output }
 
-        interproscan_file_ch = concatenate_interproscan_outputs(interproscan_outputs, out_dir)
+        interproscan_file_ch = concatenate_interproscan(interproscan_output, out_dir)
+        //interproscan_file_ch = Channel.value(interproscan_result)
       }
 
     blast_input_channel = dbs_to_process
@@ -324,6 +295,7 @@ workflow {
         .map { dbName, dbPath, dbIndex, chunk ->
             tuple(chunk, out_dir, dbName, dbIndex, params.diamond_path, dbPath)
         }
+    //blast_input_channel.view { "BLAST INPUT DEBUG: $it" }
 
     new_results = alignChunks(blast_input_channel)
         .map { result, dbName, dbPath ->
@@ -338,10 +310,7 @@ workflow {
         }
         .set { existing_files }
     
-    // reunion
-    blast_results = new_results.mix(existing_files)
-
-    blast_results // groups path and chunks by dbName
+    new_results // groups path and chunks by dbName
         .groupTuple(by: [1,2]) //dbName and dbPath
         .map { result, dbName, dbPath ->
             tuple(result, file(out_dir), dbName, dbPath)
@@ -349,44 +318,50 @@ workflow {
         .set { concat_input }
 
     concatenate_diamond_outputs(concat_input)
-        .set { concatenated_files }
-
+        .set { new_concatenated_files }
+    
+    //reunion
+    //new_concatenated_files.view { println "FIRSTnu DEBUG: $it" }
+    //existing_files.view { println "SECONDex DEBUG: $it" }
+    def concatenated_files = existing_files.mix(new_concatenated_files)
+   
     concatenated_files
         .map { blast_file, dbName, dbPath ->
+            //def db_json = JsonOutput.toJson([dbName, blast_file.toString(), dbPath.toString()])
             [
                 "dbName": dbName,
-                "blastFile": blast_file.toString(),
+                "blast_file": blast_file.toString(),
                 "dbPath": dbPath.toString()
             ]
         }
         .collect()
-        .map { db_entries ->
-            // Convert the list to JSON string
-            def json_string = groovy.json.JsonOutput.toJson(db_entries)
-        
-            // Write to a file
-            def json_file = file("${out_dir}/all_diamond_info.json")
-            json_file.text = json_string
-        
-            // Return the JSON string
-            return json_string
-        }
-        .set { db_json_ch }
-    
-    interproscan_file_ch
-        .combine(db_json_ch)
-        .map { interproscan_file, db_json ->
+        .map { db_entry_list ->
+            def db_json = groovy.json.JsonOutput.toJson(db_entry_list)
+            def json_file = file("${out_dir}/diamond_info.json")       
+            json_file.text = db_json
             tuple(
-                file(params.input_fasta),
-                interproscan_file,
-                db_json,  // Pass the JSON string directly instead of a file
+                input_fasta,
+                json_file,
                 out_dir
             )
         }
+        // This is irrelevant, it returns null no matter what, in spite of the file being written
         .set { configInput }
-
-    create_yaml(configInput)
+     
+    create_yaml(input_fasta, out_dir)
         .set { ahrd_config }
+
+//    db_json_ch
+//        .map { db_json ->
+//            def dbs = new groovy.json.JsonSlurper().parseText(db_json)
+//            def unsupported = dbs.find { !(it.dbName in ['uniprot_sprot', 'uniprot_trembl', 'uniref90']) }
+//            if (unsupported) {
+//                println "Unsupported database: ${unsupported.dbName} \nUser will need to manually add the appropriate regex lines in the AHRD .yaml"
+//                System.exit(1)
+//            }
+//            db_json
+//        }
+//        .set { validated_db_json_ch }
 
     run_ahrd(out_dir, ahrd_config)
 }
