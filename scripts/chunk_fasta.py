@@ -1,10 +1,10 @@
 import os
-import sys
+import argparse
 from Bio import SeqIO
 
 
 def chunk_fasta(fasta, out_dir, chunk_size):
-    """takes fasta file as input and outputs chunks of chunk_size"""
+    """Takes a FASTA file as input and outputs chunks of chunk_size"""
     count = 1
     chunk_number = 1
     out_dir = os.path.abspath(out_dir)
@@ -26,10 +26,11 @@ def chunk_fasta(fasta, out_dir, chunk_size):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4:
-        print(f"{sys.argv[0]}: <fasta file> <output directory> <chunk size>")
-        sys.exit(1)
-    fasta = sys.argv[1]
-    out_dir = sys.argv[2]
-    chunk_size = int(sys.argv[3])
-    chunk_fasta(fasta, out_dir, chunk_size)
+    parser = argparse.ArgumentParser(description="Parse a FASTA file and chunk at chunk size.")
+    parser.add_argument("fasta", type=str, help="Path to the proteins FASTA file")
+    parser.add_argument("out_dir", type=str, help="Out directory")
+    parser.add_argument(
+        "chunk_size", type=str, help="JSON string: [(dbName, diamond_output_file, dbPath), ...]"
+    )
+    args = parser.parse_args()
+    chunk_fasta(args.fasta, args.out_dir, args.chunk_size)
