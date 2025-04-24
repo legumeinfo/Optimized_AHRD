@@ -2,28 +2,30 @@
 nextflow.enable.dsl=2
 import groovy.json.JsonOutput
 
+# Input paramters
 params.chunksize = 500
 params.maximum_processes = 128
 params.threads = 4
 params.databases = ''
 
-simul_processes = params.maximum_processes / params.threads
-diamond_processes = simul_processes / 2
-interpro_processes = simul_processes / 2
-
+# Parameter assertions
 assert params.input_fasta != ''
 assert params.outdir != ''
 assert params.interproscan_path != ''
 assert params.diamond_path != ''
 assert !params.databases.isEmpty(), "No database/s provided"
 
+# Runtime parameters
+simul_processes = params.maximum_processes / params.threads
+diamond_processes = simul_processes / 2
+interpro_processes = simul_processes / 2
+
+
 def check_params() {
     if( params.remove('help') ) {
         params.each{ k, v -> println "params.${k.padRight(25)} = ${v}" }
         exit 0
-    }
-
-    
+    }    
     new File(params.outdir).mkdirs()
     if (!new File(params.outdir).isAbsolute()) {
         out_dir = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
@@ -33,13 +35,12 @@ def check_params() {
     }
     new File(params.outdir).mkdirs()
     return out_dir
-    // additional validation here
 }
 
+
 def load_database_csv(String csv_path) {
+    assert file.exists(), "CSV file '${csv_path}' does not exist."    
     def file = new File(csv_path)
-    assert file.exists(), "CSV file '${csv_path}' does not exist."
-    
     def databases_map = [:]
     file.eachLine { line, index ->
         if (line.trim() && !line.startsWith('#')) {
@@ -51,6 +52,7 @@ def load_database_csv(String csv_path) {
     }
     return databases_map
 }
+
 
 process chunkFasta {
     tag { fasta }
@@ -69,6 +71,7 @@ process chunkFasta {
     """
 }
 
+
 process sanitize_fasta {
     tag "fasta sanitization"
 
@@ -83,6 +86,7 @@ process sanitize_fasta {
     sed -i 's/\\*/X/g' ${myChunk}
     """
 }
+
 
 process interproscan {
     tag "interproscan"
@@ -103,6 +107,7 @@ process interproscan {
     """
 }
 
+
 process concatenate_interproscan {
     tag "concatenate raw ips files"
 
@@ -118,6 +123,7 @@ process concatenate_interproscan {
     cat ${raw_files} > ${out_dir}/interproscan_concatenated.raw
     """
 }
+
 
 process checkOutputExists {
     input:
@@ -140,6 +146,7 @@ process checkOutputExists {
     fi
     """
 }
+
 //Currently not in use, functionality to check chunks (vs. concatenated file) to skip
 process checkInterProExists {
     input:
@@ -161,6 +168,7 @@ process checkInterProExists {
     """
 }
 
+
 process alignChunks {
     tag "diamond"
 
@@ -179,6 +187,7 @@ process alignChunks {
     """
 }
 
+
 process concatenate_diamond_outputs {
     tag "concat diamonds"
 
@@ -193,6 +202,7 @@ process concatenate_diamond_outputs {
     cat ${diamond_in} > ${out_dir}/${database_name}_blasted.outfmt6.tsv
     """
 }
+
 
 process create_yaml {
     tag "Generate yaml"
@@ -211,6 +221,7 @@ process create_yaml {
     cp ahrd_config.yml ${out_dir}/ahrd_config.yml
     """
 }
+
 
 process run_ahrd{
     tag "Run ahrd"
@@ -233,6 +244,7 @@ process run_ahrd{
     cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
     """
 }
+
 
 workflow {
     println "${simul_processes}"
@@ -269,25 +281,20 @@ workflow {
         .set { dbs_to_process }
     dbs_to_process.view { "DB TO PROCESS DEBUG: $it" }
  
-    // Check if interproscan concatenated output already exists
     interproscan_result = file("${out_dir}/interproscan_concatenated.raw")
     if (interproscan_result.exists()) {
         log.warn("${out_dir}/interproscan_concatenated.raw already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
-        // Create a channel with the existing file
         interproscan_file_ch = Channel.value(file(interproscan_result))
     } else {
-        // Run interproscan
         chunk_channel
             .map { chunk -> tuple(chunk, out_dir, params.interproscan_path) }
             .set { interproscan_input }
-        //overwrite
         interproscan(interproscan_input)
             //.raw_file
             //.collect()
             .set { interproscan_output }
 
         interproscan_file_ch = concatenate_interproscan(interproscan_output, out_dir)
-        //interproscan_file_ch = Channel.value(interproscan_result)
       }
 
     blast_input_channel = dbs_to_process
@@ -295,13 +302,10 @@ workflow {
         .map { dbName, dbPath, dbIndex, chunk ->
             tuple(chunk, out_dir, dbName, dbIndex, params.diamond_path, dbPath)
         }
-    //blast_input_channel.view { "BLAST INPUT DEBUG: $it" }
-
     new_results = alignChunks(blast_input_channel)
         .map { result, dbName, dbPath ->
             tuple(result, dbName, dbPath)
         }
-
     existence_check.exists
         .map { dbName, dbPath, dbIndex, exists_file ->
             // Makes tuples with existing files that don't need alignment
@@ -309,7 +313,6 @@ workflow {
             tuple(existing_file, dbName, dbPath)
         }
         .set { existing_files }
-    
     new_results // groups path and chunks by dbName
         .groupTuple(by: [1,2]) //dbName and dbPath
         .map { result, dbName, dbPath ->
@@ -320,14 +323,10 @@ workflow {
     concatenate_diamond_outputs(concat_input)
         .set { new_concatenated_files }
     
-    //reunion
-    //new_concatenated_files.view { println "FIRSTnu DEBUG: $it" }
-    //existing_files.view { println "SECONDex DEBUG: $it" }
     def concatenated_files = existing_files.mix(new_concatenated_files)
    
     concatenated_files
         .map { blast_file, dbName, dbPath ->
-            //def db_json = JsonOutput.toJson([dbName, blast_file.toString(), dbPath.toString()])
             [
                 "dbName": dbName,
                 "blast_file": blast_file.toString(),
@@ -350,18 +349,6 @@ workflow {
      
     create_yaml(input_fasta, out_dir)
         .set { ahrd_config }
-
-//    db_json_ch
-//        .map { db_json ->
-//            def dbs = new groovy.json.JsonSlurper().parseText(db_json)
-//            def unsupported = dbs.find { !(it.dbName in ['uniprot_sprot', 'uniprot_trembl', 'uniref90']) }
-//            if (unsupported) {
-//                println "Unsupported database: ${unsupported.dbName} \nUser will need to manually add the appropriate regex lines in the AHRD .yaml"
-//                System.exit(1)
-//            }
-//            db_json
-//        }
-//        .set { validated_db_json_ch }
 
     run_ahrd(out_dir, ahrd_config)
 }
