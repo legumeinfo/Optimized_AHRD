@@ -6,6 +6,10 @@ params.chunksize = 500
 params.maximum_processes = 128
 params.threads = 4
 params.databases = ''
+params.gaf = ''
+params.ips_xml = ''
+params.desc_blacklist = ''
+params.token_blacklist = ''
 
 simul_processes = params.maximum_processes / params.threads
 diamond_processes = simul_processes / 2
@@ -16,6 +20,10 @@ assert params.outdir != ''
 assert params.interproscan_path != ''
 assert params.diamond_path != ''
 assert !params.databases.isEmpty(), "No database/s provided"
+assert params.gaf != ''
+assert params.ips_xml != ''
+assert params.desc_blacklist != ''
+assert params.token_blacklist != ''
 
 def check_params() {
     if( params.remove('help') ) {
@@ -23,15 +31,13 @@ def check_params() {
         exit 0
     }
 
-    
-    new File(params.outdir).mkdirs()
     if (!new File(params.outdir).isAbsolute()) {
         out_dir = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
         //def absoluteOutdir = new File(System.getenv('PWD'), params.outdir.toString()).getAbsolutePath()
         //params.outdir = absoluteOutdir
         println "INFO: outdir converted to absolute path: ${out_dir}"
     }
-    new File(params.outdir).mkdirs()
+    new File(out_dir).mkdirs()
     return out_dir
     // additional validation here
 }
@@ -59,13 +65,13 @@ process chunkFasta {
     path input_fasta
     path out_dir
     val chunk_size
-
+    
     output:
     path "${out_dir}/chunks/*" 
 
     script:
     """
-    python ${projectDir}/scripts/chunk_fasta.py ${input_fasta} ${out_dir} ${chunk_size}
+    python ${projectDir}/scripts/chunk_fasta.py ${input_fasta} ${out_dir} ${chunk_size} 
     """
 }
 
@@ -80,7 +86,7 @@ process sanitize_fasta {
 
     script:
     """
-    sed -i 's/\\*/X/g' ${myChunk}
+    sed -i '/^>/! {s/\\*/X/g; s/\\./X/g}' ${myChunk}
     """
 }
 
@@ -200,13 +206,18 @@ process create_yaml {
     input:
     path fasta
     path out_dir
+    path gaf
+    path ips_xml
+    path desc_blacklist
+    path token_blacklist
+    val dummy 
 
     output:
     path "${out_dir}/ahrd_config.yml"
 
     script:
     """
-    python ${projectDir}/scripts/make_yaml.py ${fasta} ${out_dir} ${out_dir}/diamond_info.json
+    python ${projectDir}/scripts/make_yaml.py ${fasta} ${out_dir} ${out_dir}/diamond_info.json ${gaf} ${ips_xml} ${desc_blacklist} ${token_blacklist}
     
     cp ahrd_config.yml ${out_dir}/ahrd_config.yml
     """
@@ -283,7 +294,8 @@ workflow {
         //overwrite
         interproscan(interproscan_input)
             //.raw_file
-            //.collect()
+            // So that we wait for all of the chunks!
+            .collect()
             .set { interproscan_output }
 
         interproscan_file_ch = concatenate_interproscan(interproscan_output, out_dir)
@@ -339,16 +351,17 @@ workflow {
             def db_json = groovy.json.JsonOutput.toJson(db_entry_list)
             def json_file = file("${out_dir}/diamond_info.json")       
             json_file.text = db_json
-            tuple(
-                input_fasta,
-                json_file,
-                out_dir
-            )
+            return "dummy"
+            //tuple(
+                //input_fasta,
+                //json_file,
+            //)
         }
-        // This is irrelevant, it returns null no matter what, in spite of the file being written
+        // This returns null no matter what, in spite of the file being written
+        // Just using it as a control to delay create_yaml, which runs immediately otherwise
         .set { configInput }
      
-    create_yaml(input_fasta, out_dir)
+    create_yaml(input_fasta, out_dir, params.gaf, params.ips_xml, params.desc_blacklist, params.token_blacklist, configInput)
         .set { ahrd_config }
 
 //    db_json_ch
