@@ -21,33 +21,39 @@ def create_yaml(proteins_fasta, out_dir, db_tuples_json, gaf_path, ips_xml_path,
         db_path = db_tuple["dbPath"]
          
         db_section = {
-            'weight': 653,
-            'description_score_bit_score_weight': 2.717061,
+            'weight': 100,
+            'description_score_bit_score_weight': 0.4,
             'file': os.path.abspath(diamond_result),
             'database': os.path.abspath(db_path),
             'blacklist': os.path.abspath(desc_blacklist),
             'token_blacklist': os.path.abspath(token_blacklist),
         }
-        print(db_name)
+        #print(db_name)
         if db_name.lower() == "uniref90":
             db_section["fasta_header_regex"] = r"^>(?<accession>UniRef90_\S+)\s+(?<description>.+?)(?=\s(?:n=|OS=)|$)"
             db_section["short_accession_regex"] = r"UniRef90_(?<shortAccession>[A-Z0-9]+)"
-        
+            db_section["filter"] = "/erdos/adf/e01/lis/AHRD/2.0-stable/resources/filter_descline_trembl.txt"
+        # needs separation for filter
         elif db_name.lower() in ["trembl", "swissprot"]:
             #db_section["fasta_header_regex"] = r"^>(?<accession>\S+)\s+(?<description>.+?)(?=\s(?:n=|OS=)|$)"
             #db_section["fasta_header_regex"] = r"^>(?<accession>\S+)\s+(?<description>.+?)(?=\s+(?:OS=|n=)|$)"
             #db_section["fasta_header_regex"] = r"^>(?<accession>\\S+)\\s+(?<description>Uncharacterized protein TEST)"
             #works best without regex
             db_section["short_accession_regex"] = r"^\w+\|(?<shortAccession>\w+)\|"
+            db_section["filter"] = "/erdos/adf/e01/lis/AHRD/2.0-stable/resources/filter_descline_trembl.txt"
         
         elif db_name.lower() == "glyma_refseq":
             db_section["fasta_header_regex"] = r"^>(?<accession>\S+)\s+(?<description>.+?)(?=\s*\[|$)"
             db_section["short_accession_regex"] = r"^\s*(?<shortAccession>\S+)"
+            db_section["filter"] = "/erdos/adf/e01/lis/AHRD/2.0-stable/resources/filter_descline_sprot.txt"
+            # special one for glyma
+            db_section["blacklist"] = "/erdos/adf/chado_preprocessing/AHRD/glyma_blacklist_descline.txt"
 
         elif db_name.lower() == "medtr_lis":
             db_section["fasta_header_regex"] = r"^>(?<accession>\S+).*?def=(?<description>.+)$"
             db_section["short_accession_regex"] = r"^(?<shortAccession>\S+)"
-        
+            db_section["filter"] = "/erdos/adf/e01/lis/AHRD/2.0-stable/resources/filter_descline_sprot.txt"
+
         blast_dbs[db_name] = db_section
 
     data = {
@@ -56,11 +62,13 @@ def create_yaml(proteins_fasta, out_dir, db_tuples_json, gaf_path, ips_xml_path,
         'interpro_result' : os.path.abspath(os.path.join(out_dir, 'interproscan_concatenated.raw')),
         #'gene_ontology_result': '/data/elavelle/databases/goa_uniprot_all.gaf',
         'gene_ontology_result' : os.path.abspath(gaf_path),
-        'reference_go_regex': '^UniProtKB\s+(?<shortAccession>\S+)\s+\S+\s+\S+\s+(?<goTerm>GO:\d{7})',
+        'reference_go_regex': '^(?<shortAccession>\S+)\s+(?<goTerm>GO:\d{7})',
+        #'reference_go_regex': '^UniProtKB\s+(?<shortAccession>\S+)\s+\S+\s+\S+\s+(?<goTerm>GO:\d{7})',
         'proteins_fasta': os.path.abspath(proteins_fasta),
-        'token_score_bit_score_weight': 0.468,
-        'token_score_database_score_weight': 0.2098,
-        'token_score_overlap_score_weight': 0.3221,
+        'token_score_bit_score_weight': 0.5,
+        'token_score_database_score_weight': 0.3,
+        'token_score_overlap_score_weight': 0.2,
+        'description_score_relative_description_frequency_weight': 0.6,
         'output': './ahrd_interpro_output.csv',
         'blast_dbs': blast_dbs,
     }

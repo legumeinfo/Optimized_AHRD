@@ -10,6 +10,7 @@ params.gaf = ''
 params.ips_xml = ''
 params.desc_blacklist = ''
 params.token_blacklist = ''
+params.dtd_file = ''
 
 simul_processes = params.maximum_processes / params.threads
 diamond_processes = simul_processes / 2
@@ -24,6 +25,7 @@ assert params.gaf != ''
 assert params.ips_xml != ''
 assert params.desc_blacklist != ''
 assert params.token_blacklist != ''
+assert params.dtd_file != ''
 
 def check_params() {
     if( params.remove('help') ) {
@@ -236,10 +238,8 @@ process run_ahrd{
     script:
     """
     echo "" > blank1.txt
-    echo "" > blank2.txt
-    echo "" > blank3.txt
     
-    ln -s /data/elavelle/databases/interpro.dtd
+    ln -s ${params.dtd_file} ./
     java -jar /home/elavelle/software/AHRD/dist/ahrd.jar ahrd_config.yml
     cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
     """
