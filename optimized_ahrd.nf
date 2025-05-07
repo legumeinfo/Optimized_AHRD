@@ -106,8 +106,8 @@ process interproscan {
     script:
     """
     mkdir -p ${out_dir}/interproscan_out
-    ${interproscan_path} -i $myChunk -f XML -o ${out_dir}/interproscan_out/${myChunk}.xml
-    ${interproscan_path} -mode convert -f RAW -i ${out_dir}/interproscan_out/${myChunk}.xml -b ${out_dir}/interproscan_out/${myChunk}
+    ${interproscan_path} -i $myChunk -f XML --goterms -o ${out_dir}/interproscan_out/${myChunk}.xml
+    ${interproscan_path} -mode convert --overwrite -f RAW -i ${out_dir}/interproscan_out/${myChunk}.xml -b ${out_dir}/interproscan_out/${myChunk}
     """
 }
 
@@ -233,7 +233,7 @@ process run_ahrd{
     path ahrd_config    
 
     output:
-    path "ahrd_interpro_output.csv"
+    path "ahrd_interpro_output.csv", emit: ahrd_out
 
     script:
     """
@@ -242,6 +242,47 @@ process run_ahrd{
     ln -s ${params.dtd_file} ./
     java -jar /home/elavelle/software/AHRD/dist/ahrd.jar ahrd_config.yml
     cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
+    """
+}
+
+process appendGOids {
+    tag "tack on GO ids associated with queries via IPS"
+    
+    input:
+    path ahrd_output
+    path interpro_tsv
+    path out_dir
+
+    output:
+    path "${out_dir}/ahrd_with_go_ids.tsv"
+
+    script:
+    """
+    #Debug - list all inputs
+    echo "AHRD output file: $ahrd_output"
+    echo "InterPro TSV: $interpro_tsv" 
+    echo "Output dir: $out_dir"
+
+    perl ${projectDir}/scripts/ipr2go.pl $interpro_tsv > go_map.tsv
+    #sed '3s/\$/\tQuery_GO_terms/' $ahrd_output > ${out_dir}/ahrd_with_go_ids.tsv
+
+    awk 'BEGIN {FS=OFS="\t"}
+        FNR==NR {
+            if (\$1 in map) {
+                map[\$1] = map[\$1] "," \$2;
+            } else {
+                map[\$1] = \$2;
+            }
+            next;
+    }
+    FNR==3 {
+        print \$0, "Query_GO_terms";  # Add header for GO terms
+        next;
+    }
+    FNR > 3 {
+        go_terms = (\$1 in map) ? map[\$1] : "";
+        print \$0, go_terms;
+    }' go_map.tsv "$ahrd_output" > "${out_dir}/ahrd_with_go_ids.tsv"
     """
 }
 
@@ -294,7 +335,6 @@ workflow {
         //overwrite
         interproscan(interproscan_input)
             //.raw_file
-            // So that we wait for all of the chunks!
             .collect()
             .set { interproscan_output }
 
@@ -333,8 +373,6 @@ workflow {
         .set { new_concatenated_files }
     
     //reunion
-    //new_concatenated_files.view { println "FIRSTnu DEBUG: $it" }
-    //existing_files.view { println "SECONDex DEBUG: $it" }
     def concatenated_files = existing_files.mix(new_concatenated_files)
    
     concatenated_files
@@ -375,6 +413,18 @@ workflow {
 //            db_json
 //        }
 //        .set { validated_db_json_ch }
-
-    run_ahrd(out_dir, ahrd_config)
+    
+    // soley because nf refuses to use out_dir in a definition
+    def out_dir2 = check_params()
+    def ahrd_output = file("${out_dir2}/ahrd_output_file.csv")
+    if (!ahrd_output.exists()) {
+       run_ahrd(out_dir, ahrd_config)
+           .set {ahrd_output_ch}
+    }
+    else{
+        println "ahrd_output_file.csv already exists. Delete from outdir if you wish to regenerate."
+        Channel.fromPath(ahrd_output)
+            .set { ahrd_output_ch }
+    }
+    appendGOids(ahrd_output_ch, interproscan_file_ch, out_dir)
 }
