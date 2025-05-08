@@ -268,10 +268,12 @@ process appendGOids {
 
     awk 'BEGIN {FS=OFS="\t"}
         FNR==NR {
-            if (\$1 in map) {
-                map[\$1] = map[\$1] "," \$2;
+            key = \$1
+            val = \$2 " (" \$3 ")"
+            if (key in map) {
+                map[key] = map[key] ", " val;
             } else {
-                map[\$1] = \$2;
+                map[key] = val;
             }
             next;
     }
@@ -285,6 +287,53 @@ process appendGOids {
     }' go_map.tsv "$ahrd_output" > "${out_dir}/ahrd_with_go_ids.tsv"
     """
 }
+
+process create_GO_lookup {
+    tag "Download .obo and create lookup table"
+
+    output:
+    path "go_term_lookup.tsv"
+
+    script:
+    """
+    # Download the .obo
+    wget -q http://purl.obolibrary.org/obo/go.obo -O go.obo
+
+    # parse to make lookup table 
+    awk '
+    BEGIN { 
+        FS=" ";
+        print "GO_ID\\tDescription"; 
+    }
+    /^\\[Term\\]/ { term=1; id=""; name=""; next }
+    term==1 && /^id: GO:/ { id=\$2; next }
+    term==1 && /^name:/ { 
+        name=substr(\$0, 7); 
+        if (id != "" && name != "") {
+            print id "\\t" name;
+            id=""; name=""; term=0;
+        }
+    }
+    ' go.obo > go_term_lookup.tsv
+    """
+}
+
+process description_for_hits {
+    tag "Insert descriptions for hit GO terms"
+
+    input:
+    path ahrd_output_with_go
+    path go_lookup
+    path out_dir
+
+    output:
+    path "${out_dir}/ahrd_with_all_descriptions.tsv"
+
+    script:
+    """
+    python ${projectDir}/scripts/add_hit_descriptors.py ${ahrd_output_with_go} ${go_lookup} ${out_dir}   
+    """
+    }
 
 workflow {
     println "${simul_processes}"
@@ -414,7 +463,7 @@ workflow {
 //        }
 //        .set { validated_db_json_ch }
     
-    // soley because nf refuses to use out_dir in a definition
+    // soley because nf refuses to use out_dir in a definition again, duplicate it
     def out_dir2 = check_params()
     def ahrd_output = file("${out_dir2}/ahrd_output_file.csv")
     if (!ahrd_output.exists()) {
@@ -427,4 +476,10 @@ workflow {
             .set { ahrd_output_ch }
     }
     appendGOids(ahrd_output_ch, interproscan_file_ch, out_dir)
+        .set { appendedOut }
+
+    create_GO_lookup()
+        .set { go_lookup }
+
+    description_for_hits(appendedOut, go_lookup, out_dir)
 }
