@@ -107,7 +107,10 @@ process interproscan {
     """
     mkdir -p ${out_dir}/interproscan_out
     ${interproscan_path} -i $myChunk -f XML --goterms -o ${out_dir}/interproscan_out/${myChunk}.xml
-    ${interproscan_path} -mode convert --overwrite -f RAW -i ${out_dir}/interproscan_out/${myChunk}.xml -b ${out_dir}/interproscan_out/${myChunk}
+    if [ -f "${out_dir}/interproscan_out/${myChunk}.raw" ]; then
+        rm "${out_dir}/interproscan_out/${myChunk}.raw"
+    fi
+    ${interproscan_path} -mode convert -f RAW -i ${out_dir}/interproscan_out/${myChunk}.xml -b ${out_dir}/interproscan_out/${myChunk}
     """
 }
 
@@ -212,7 +215,8 @@ process create_yaml {
     path ips_xml
     path desc_blacklist
     path token_blacklist
-    val dummy 
+    val dummy
+    path IPSdummy 
 
     output:
     path "${out_dir}/ahrd_config.yml"
@@ -375,7 +379,8 @@ workflow {
     if (interproscan_result.exists()) {
         log.warn("${out_dir}/interproscan_concatenated.raw already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
         // Create a channel with the existing file
-        interproscan_file_ch = Channel.value(file(interproscan_result))
+        //interproscan_file_ch = Channel.value(file(interproscan_result))
+        interproscan_output = Channel.value(file(interproscan_result))
     } else {
         // Run interproscan
         chunk_channel
@@ -447,8 +452,9 @@ workflow {
         // This returns null no matter what, in spite of the file being written
         // Just using it as a control to delay create_yaml, which runs immediately otherwise
         .set { configInput }
-     
-    create_yaml(input_fasta, out_dir, params.gaf, params.ips_xml, params.desc_blacklist, params.token_blacklist, configInput)
+    
+    // interproscan_output is also a dummy input 
+    create_yaml(input_fasta, out_dir, params.gaf, params.ips_xml, params.desc_blacklist, params.token_blacklist, configInput, interproscan_output)
         .set { ahrd_config }
 
 //    db_json_ch
@@ -475,7 +481,7 @@ workflow {
         Channel.fromPath(ahrd_output)
             .set { ahrd_output_ch }
     }
-    appendGOids(ahrd_output_ch, interproscan_file_ch, out_dir)
+    appendGOids(ahrd_output_ch, interproscan_output, out_dir)
         .set { appendedOut }
 
     create_GO_lookup()
