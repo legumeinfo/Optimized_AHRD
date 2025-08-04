@@ -19,7 +19,7 @@ Arguments:
 The proteins to analyze; the .faa extension is not required, though diamond will exit with an error message if a nucleotide file is provided.
 
 --databases (required)
-3 column .csv file including database name, full path to database, and diamond index file, respectively. Any number of desired databases >= 1 is acceptable, though the names must match one of the following strings: uniref90, swissprot, trembl, medtr_LIS
+3 column .csv file including database name, full path to database, and diamond index file, respectively. Any number of desired databases >= 1 is acceptable, though the names must match one of the following strings: uniref90, swissprot, trembl, medtr_lis, glyma_refseq
 Uncompressed and gzipped .fasta files are both acceptable.
 
 --gaf (required for GO terms)
