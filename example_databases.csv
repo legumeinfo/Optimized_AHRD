@@ -1,0 +1,5 @@
+uniref90,/data/elavelle/databases/uniref90.fasta,/data/elavelle/databases/uniref90.dmnd
+swissprot,/data/elavelle/databases/uniprot_sprot.fasta,/data/elavelle/databases/uniprot_sprot.dmnd
+trembl,/data/elavelle/databases/uniprot_trembl.fasta,/data/elavelle/databases/uniprot_trembl.dmnd
+glyma_refseq,/data/elavelle/databases/GCF_000004515.6_Glycine_max_v4.0_protein.faa,/data/elavelle/databases/glyma_refseq.dmnd
+medtr_LIS,/data/elavelle/databases/medtr.A17.gnm5.ann1_6.L2RX.protein.faa,/data/elavelle/databases/medtr_LIS.dmnd
