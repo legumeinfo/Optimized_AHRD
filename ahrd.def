@@ -1,0 +1,48 @@
+Bootstrap: docker
+
+From: python:3.11-slim-bullseye
+
+%labels
+    Author Evan
+    Version 5.72-103.0
+
+%files
+    /home/elavelle/tmp_interproscan_build/nf_sandbox/bin /bin
+    /home/elavelle/tmp_interproscan_build/nf_sandbox/bin/scripts /bin/scripts
+    /home/elavelle/tmp_interproscan_build/nf_sandbox/opt /opt
+    /home/elavelle/tmp_interproscan_build/nf_sandbox/opt/interproscan-5.72-103.0 /opt/interproscan-5.72-103.0
+/home/elavelle/software/diamond /usr/local/bin/diamond
+    /home/elavelle/tmp_interproscan_build/nf_sandbox/resources /resources
+    /data/elavelle/databases/interpro.dtd /interpro.dtd
+    #/home/elavelle/tmp_interproscan_build/nf_sandbox/usr/local/lib64/python3.9/site-packages /usr/local/lib64/python3.9/site-packages
+    #/home/elavelle/tmp_interproscan_build/nf_sandbox/usr/local/lib64/python3.9/site-packages/yaml /usr/local/lib64/python3.9/site-packages/yaml
+
+%post
+    apt-get update && \
+    apt-get install -y openjdk-17-jre-headless curl libgomp1 libc6-dev build-essential unzip perl zlib1g procps python3-yaml python3-pip && \
+    apt-get clean
+    pip3 install PyYAML
+    echo "/opt/interproscan-*/lib" >> /etc/ld.so.conf
+    ldconfig
+    #export PYTHONPATH=/usr/local/lib64/python3.9/site-packages:$PYTHONPATH      
+    mkdir -p /opt/scripts
+
+
+    # Nextflow
+    cd /opt
+    curl -s https://get.nextflow.io | bash
+    chmod +x nextflow
+    pip install biopython
+    
+    #IPS
+    #curl -O https://ftp.ebi.ac.uk/pub/software/unix/iprscan/5/5.72-103.0/interproscan-5.72-103.0-64-bit.tar.gz
+    #tar -xzf interproscan-5.72-103.0-64-bit.tar.gz
+    #rm interproscan-5.72-103.0-64-bit.tar.gz
+
+%environment
+    #export PATH=/opt:$PATH
+    #echo 'PATH="/opt/interproscan-5.72-103.0:$PATH"' >> /etc/environment
+    #export PATH=/opt/interproscan-5.72-103.0:/opt:$PATH
+
+%runscript
+    exec bash
