@@ -10,7 +10,7 @@ This will load the apptainer/1.3.1 and nextflow/24.10.1 defaults.
 
 Example command:
 ```
-nextflow run ahrd_singularity.nf -with-apptainer /project/legume_project/singularity_images/AHRD.sif --chunksize 500 --threads_per_process 4 --total_threads 200 --input_fasta pissa.Cameor.gnm1.ann1.7SZR.protein_primary.faa --outdir pissa_test --databases databases.csv --gaf /reference/data/Uniprot/2025-07-07/goa_uniprot_all.gaf.gz
+nextflow run /project/legume_project/common_data/ahrd/ahrd_singularity.nf -with-apptainer /project/legume_project/singularity_images/AHRD.sif --chunksize 500 --threads_per_process 4 --total_threads 200 --input_fasta pissa.Cameor.gnm1.ann1.7SZR.protein_primary.faa --outdir pissa_test --databases databases.csv --gaf /reference/data/Uniprot/2025-07-07/goa_uniprot_all.gaf.gz
 ```
 Arguments:
 	
