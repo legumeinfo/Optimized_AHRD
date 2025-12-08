@@ -1,18 +1,17 @@
-Create/modify nextflow.config:
-
-Must be in the directory the pipeline is launched from. Bind mounts must be provided in “runOptions” for the database/s directory, as well as any other directories involved in the command (apart from the working directory). Memory overrides are important to ensure resources for the computationally demanding processes. 
+Create/modify nextflow.config (example present in /project/legume_project/singularity_images/).
+This file must be in the directory the pipeline is launched from. Bind mounts must be provided in “runOptions” for the database/s directory, as well as any other directories involved in the command (apart from the working directory). Memory overrides are important to ensure resources for the computationally demanding processes. 
 
 Load modules:
-
+```
 module load nextflow
 module load apptainer
-
+```
 This will load the apptainer/1.3.1 and nextflow/24.10.1 defaults. 
 
 Example command:
-
-nextflow run ahrd_singularity.nf -with-apptainer AHRD.sif --chunksize 500 --threads_per_process 4 --total_threads 200 --input_fasta pissa.Cameor.gnm1.ann1.7SZR.protein_primary.faa --outdir pissa_test --databases databases.csv --gaf /reference/data/Uniprot/2025-07-07/goa_uniprot_all.gaf.gz
-
+```
+nextflow run /project/legume_project/common_data/ahrd/ahrd_singularity.nf -with-apptainer /project/legume_project/singularity_images/AHRD.sif --chunksize 500 --threads_per_process 4 --total_threads 200 --input_fasta pissa.Cameor.gnm1.ann1.7SZR.protein_primary.faa --outdir pissa_test --databases databases.csv --gaf /reference/data/Uniprot/2025-07-07/goa_uniprot_all.gaf.gz
+```
 Arguments:
 	
 --input_fasta (required)
@@ -43,7 +42,6 @@ Notes:
 
 •	The work directory “work” persists as a general nextflow feature. It is advised to delete this periodically in the absence of special cause to retain it. 
 
-•	As a reference datum, an input of ~89k Pisum sativum proteins completes in ~11 hours with total_threads = 400 and threads_per_process = 4. Completion time will vary with queue load. 
-
+•	For reference: An input of ~89k Pisum sativum proteins completes in ~11 hours with total_threads = 400 and threads_per_process = 4. Expect the AHRD portion to run for 1-2 hours. Completion time will vary with queue load. 
 
 
