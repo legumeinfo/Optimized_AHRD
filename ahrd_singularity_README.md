@@ -1,7 +1,11 @@
-Create/modify nextflow.config (example present in /project/legume_project/singularity_images/).
-This file must be in the directory the pipeline is launched from. Bind mounts must be provided in “runOptions” for the database/s directory, as well as any other directories involved in the command (apart from the working directory). Memory overrides are important to ensure resources for the computationally demanding processes. 
+Create/modify nextflow.config:
+This file must be in the directory the pipeline is launched from. Bind mounts must be provided in “runOptions” for the database/s directory, as well as any other directories involved in the command (including the working directory). Memory overrides are important to ensure resources for the computationally demanding processes. 
 
-Load modules:
+Note: The example .config file in this repository is configured for Ceres. In an environment using Singularity, the name of that section should be changed from "apptainer" to "singularity" in the config, and the flag "-with-apptainer" in the run command changed to "-with-singularity". Additionally, different options under "process" in the .config may not be necessary. On dal, for example, only the line
+env.PYTHONPATH = '/usr/local/lib64/python3.9/site-packages'
+is required there.
+
+Load modules (names also dependent on environment):
 ```
 module load nextflow
 module load apptainer
