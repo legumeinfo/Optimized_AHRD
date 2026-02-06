@@ -41,7 +41,7 @@ Directory name for output folder. Relative path is acceptable.
 
 Notes:
 
-•	The pipeline may be restarted with progress retained after alignment and/or interproscan processes have completed on all .fasta “chunks” and been concatenated, as well as when the ahrd_config.yml is generated.
+•	The pipeline may be restarted with progress retained after alignment and/or interproscan processes have completed on all .fasta “chunks” and been concatenated.
 
 •	Because the pipeline will not overwrite these files (or the .fasta chunks), a new out_dir should be provided for different runs (when the ‘resume’ functionality is not required/desired), or the contents of the out_dir deleted prior. There is a warning message to this effect when reusing an existing out_dir.
 
