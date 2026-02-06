@@ -26,6 +26,7 @@ The proteins to analyze; the .faa extension is not required, though diamond will
 Uncompressed and gzipped .fasta files are both acceptable.
 
 --gaf (required for GO terms)
+In contrast to default AHRD parameters, this file must be gzipped.
 
 --chunksize <500>
 	number of records (- 1) each “chunk” of the input_fasta will include. 
@@ -33,10 +34,10 @@ Uncompressed and gzipped .fasta files are both acceptable.
 --total_threads <128>
 	
 --threads_per_process <4>
-	total_threads / threads_per_process will equal the processes created, not accounting for the controller.
+total_threads / threads_per_process will equal the processes created, not accounting for the controller.
 
 --outdir <working directory>
-	Directory name for output folder. Relative path is acceptable.
+Directory name for output folder. Relative path is acceptable.
 
 Notes:
 
@@ -46,6 +47,6 @@ Notes:
 
 •	The work directory “work” persists as a general nextflow feature. It is advised to delete this periodically in the absence of special cause to retain it. 
 
-•	For reference: An input of ~89k Pisum sativum proteins completes in ~11 hours with total_threads = 400 and threads_per_process = 4. Expect the AHRD portion to run for 1-2 hours. Completion time will vary with queue load. 
+•	For reference: An input of ~89k Pisum sativum proteins completes in ~11 hours with total_threads = 400 and threads_per_process = 4. Expect the AHRD portion to run for ~30 min. Completion time will vary with queue load. 
 
 
