@@ -66,7 +66,7 @@ process chunkFasta {
     val chunk_size
     
     output:
-    path "${out_dir}/chunks/*" 
+    path "${out_dir}/chunks/*fasta" 
 
     script:
     """
@@ -188,7 +188,7 @@ process alignChunks {
     output:
     tuple path("${out_dir}/diamond_out/${database_name}/${myChunk.baseName}.outfmt6.tsv"), val(database_name), val(database_path)
  
-    maxForks diamond_processes    
+    maxForks diamond_processes
 
     script:
     """
@@ -213,26 +213,25 @@ process concatenate_diamond_outputs {
 }
 
 process create_yaml {
-    tag "Generate yaml"
+    tag "Generate yaml per fasta chunk"
     
     input:
-    path fasta
+    tuple path(fasta), path(json_chunk)
     path out_dir
     path gaf
     path ips_xml
     path desc_blacklist
     path token_blacklist
-    val dummy
     path IPSdummy 
 
     output:
-    path "${out_dir}/ahrd_config.yml"
-
+    path "${out_dir}/chunks/${json_chunk.baseName}_ahrd_config.yml"
+    
     script:
     """
-    python3 /bin/scripts/make_yaml.py ${fasta} ${out_dir} ${out_dir}/diamond_info.json ${gaf} ${ips_xml} ${desc_blacklist} ${token_blacklist}
-    
-    cp ahrd_config.yml ${out_dir}/ahrd_config.yml
+    python3 /bin/scripts/make_yaml.py ${fasta} ${out_dir} ${json_chunk} ${gaf} ${ips_xml} ${desc_blacklist} ${token_blacklist}
+
+    mv ahrd_config.yml ${out_dir}/chunks/${json_chunk.baseName}_ahrd_config.yml
     """
 }
 
@@ -240,20 +239,41 @@ process run_ahrd{
     tag "Run ahrd"
 
     input:
-    path out_dir
-    path ahrd_config    
+    each path(out_dir)
+    path ahrd_config
 
     output:
-    path "ahrd_interpro_output.csv", emit: ahrd_out
+    path "${out_dir}/chunks/${ahrd_config.baseName}_ahrd_output.csv", emit: ahrd_out
 
     script:
     """
     echo "" > blank1.txt
-    
     ln -s /resources/interpro.xml
     ln -s /resources/interpro.dtd
-    java -jar /bin/scripts/ahrd.jar ahrd_config.yml
-    cp ahrd_interpro_output.csv ${out_dir}/ahrd_output_file.csv
+    java -jar /bin/scripts/ahrd.jar ${out_dir}/chunks/${ahrd_config}
+    cp ahrd_interpro_output.csv ${out_dir}/chunks/${ahrd_config.baseName}_ahrd_output.csv
+    """
+}
+
+process merge_ahrd {
+    tag "merge ahrd configs"
+
+    input:
+    path out_dir
+    path configs
+
+    output:
+    path "${out_dir}/ahrd_merged.csv", emit: ahrd_out
+
+    script:
+    """
+    # Grabs header
+    grep -m 1 '^Protein-Accession' ${configs[0]} > merged.csv
+    # Ignores empty lines and duplicate headers to append
+    tail -n +2 -q ${configs.join(' ')} | grep -v '^Protein-Accession' | grep -v '^\$' >> merged.csv   
+    #head -n 1 ${configs[0]} > merged.csv
+    #tail -n +2 -q ${configs.join(' ')} >> merged.csv
+    mv merged.csv ${out_dir}/ahrd_merged.csv
     """
 }
 
@@ -277,7 +297,6 @@ process appendGOids {
     
     perl /bin/scripts/ipr2go.pl $interpro_raw > go_map.tsv
     cp go_map.tsv ${out_dir}/
-    #sed '3s/\$/\tQuery_GO_terms/' $ahrd_output > ${out_dir}/ahrd_with_go_ids.tsv
     echo "Perl script completed, go_map.tsv size:"
     ls -la go_map.tsv
     head -5 go_map.tsv
@@ -293,7 +312,7 @@ process appendGOids {
             }
             next;
     }
-    FNR==3 {
+    FNR==1 {
         print \$0, "Query_GO_terms";  # Add header for GO terms
         next;
     }
@@ -312,7 +331,6 @@ process appendGOids {
         fi   
     """
 }
-
 
 go_obo_file="/resources/go.obo"
 
@@ -377,6 +395,23 @@ process description_for_hits {
 
     }
 
+process write_json {
+    publishDir "${params.outdir}/chunks", mode: 'copy'
+
+    input:
+    tuple val(chunkId), val(db_entries)
+    
+    output:
+    path "diamond_info_${chunkId}.json"
+    
+    script:
+    """
+    cat > diamond_info_${chunkId}.json << 'EOF'
+    ${groovy.json.JsonOutput.toJson(db_entries)}
+    EOF
+    """
+}
+
 workflow {
     println "${simul_processes}"
     input_fasta = file(params.input_fasta) 
@@ -417,7 +452,6 @@ workflow {
     if (interproscan_result.exists()) {
         log.warn("${out_dir}/interproscan_concatenated.raw already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
         // Create a channel with the existing file
-        //interproscan_file_ch = Channel.value(file(interproscan_result))
         interproscan_output = Channel.value(file(interproscan_result))
     } else {
         // Run interproscan
@@ -426,12 +460,10 @@ workflow {
             .set { interproscan_input }
         //overwrite
         interproscan(interproscan_input)
-            //.raw_file
             .collect()
             .set { interproscan_output }
 
         interproscan_file_ch = concatenate_interproscan(interproscan_output, out_dir)
-        //interproscan_file_ch = Channel.value(interproscan_result)
       }
 
     blast_input_channel = dbs_to_process
@@ -439,61 +471,102 @@ workflow {
         .map { dbName, dbPath, dbIndex, chunk ->
             tuple(chunk, out_dir, dbName, dbIndex, dbPath)
         }
-    //blast_input_channel.view { "BLAST INPUT DEBUG: $it" }
 
-    new_results = alignChunks(blast_input_channel)
+    new_files = alignChunks(blast_input_channel)
         .map { result, dbName, dbPath ->
             tuple(result, dbName, dbPath)
         }
-
+    
     existence_check.exists
         .map { dbName, dbPath, dbIndex, exists_file ->
             // Makes tuples with existing files that don't need alignment
-            def existing_file = file("${out_dir}/${dbName}_blasted.outfmt6.tsv")
-            tuple(existing_file, dbName, dbPath)
+            tuple(dbName, dbPath)
         }
         .set { existing_files }
     
-    new_results // groups path and chunks by dbName
+    new_files // groups path and chunks by dbName
         .groupTuple(by: [1,2]) //dbName and dbPath
         .map { result, dbName, dbPath ->
             tuple(result, file(out_dir), dbName, dbPath)
         }
         .set { concat_input }
-
+    
+    // Not strictly part of this pipeline, but creates files for the check if out_dir is reused
     concatenate_diamond_outputs(concat_input)
-        .set { new_concatenated_files }
-    
+        //set {new_concatenated_files}
     //reunion
-    def concatenated_files = existing_files.mix(new_concatenated_files)
-   
-    concatenated_files
-        .map { blast_file, dbName, dbPath ->
-            //def db_json = JsonOutput.toJson([dbName, blast_file.toString(), dbPath.toString()])
-            [
-                "dbName": dbName,
-                "blast_file": blast_file.toString(),
-                "dbPath": dbPath.toString()
-            ]
+    //def concatenated_files = existing_files.mix(new_concatenated_files)
+ 
+    //concatenated_files
+        //.map { blast, db, path -> tuple(db, path) }
+        //.collect()
+        //.set { db_paths_list }
+
+    // THIS WILL ONLY RUN ON EXISTING DATABASES (IT DOES NOT WAIT OR RUN IN SEQUENCE)
+    Channel.fromPath("${out_dir}/diamond_out/*/*.outfmt6.tsv")
+        .map { chunkBlast ->
+            def dbName = chunkBlast.parent.name
+            def chunkId = chunkBlast.name.split('\\.')[0]
+            tuple(dbName, chunkId, file(chunkBlast))
         }
-        .collect()
-        .map { db_entry_list ->
-            def db_json = groovy.json.JsonOutput.toJson(db_entry_list)
-            def json_file = file("${out_dir}/diamond_info.json")       
-            json_file.text = db_json
-            return "dummy"
-            //tuple(
-                //input_fasta,
-                //json_file,
-            //)
-        }
-        // This returns null no matter what, in spite of the file being written
-        // Just using it as a control to delay create_yaml, which runs immediately otherwise
-        .set { configInput }
+        .set { existsPart2 }
     
-    // interproscan_output is also a dummy input 
-    create_yaml(input_fasta, out_dir, params.gaf, file("/resources/interpro.xml"), params.desc_blacklist, params.token_blacklist, configInput, interproscan_output)
-        .set { ahrd_config }
+    existing_files
+        .join(existsPart2)
+        .map { dbNames, dbPath, chunkId, chunkBlast ->
+            tuple(chunkId, chunkBlast, dbNames, dbPath)
+        //println "DEBUG - existDBpaths: ${dbPath}"
+        }
+        .set { existsFull }
+
+    new_files.map { chunkBlast, dbNames, dbPath ->
+            chunkBlast = file(chunkBlast)
+            def chunkId = chunkBlast.name.split('\\.')[0]
+            tuple(chunkId, chunkBlast, dbNames, dbPath)
+        }
+        .set {just_new}
+
+    existsFull
+        .mix(just_new)
+        .map { chunkId, chunkBlast, dbNames, dbPaths ->
+         tuple(
+            chunkId,
+            chunkBlast,
+            dbNames,
+            dbPaths
+        )
+        }
+        .set { all }
+ 
+        all 
+        // "compresses" list: e.g.:(chunkId, [blastFiles], [dbNames], dbName1, dbPath1, etc.)
+        .groupTuple(by: 0)
+
+        .map { args ->
+            //println "DEBUG - full args: ${args}"
+            def chunkId = args[0]
+            def blastFiles = args[1]
+            def dbNames = args[2]
+            def dbPath = args[3]
+   
+            def db_entries = (0..<dbNames.size()).collect { i ->
+ 	         def dbName = dbNames[i]
+	         ["dbName": dbName, "blast_file": "${out_dir}/diamond_out/${dbName}/${blastFiles[i].name}", "dbPath": dbPath[i]]
+                }
+                def json_file = file("${out_dir}/chunks/diamond_info_${chunkId}.json")
+                def json_content = "[" + db_entries.collect { entry ->
+                // MANUAL creation of .json, because the groovy function causes stack overflow for some reason
+                """{"dbName":"${entry.dbName}","blast_file":"${entry['blast_file']}","dbPath":"${entry.dbPath}"}"""
+                }.join(",") + "]"
+                
+                json_file.text = json_content
+                def chunk_fasta = file("${out_dir}/chunks/${chunkId}.fasta")
+                tuple(chunk_fasta, json_file)
+        }
+        .set {yaml_input_channel}
+
+    create_yaml(yaml_input_channel, out_dir, file(params.gaf).toAbsolutePath().toString(), file("/resources/interpro.xml"), params.desc_blacklist, params.token_blacklist, interproscan_output)
+        .set { ahrd_configs }
 
 //    db_json_ch
 //        .map { db_json ->
@@ -507,18 +580,25 @@ workflow {
 //        }
 //        .set { validated_db_json_ch }
     
-    // soley because nf refuses to use out_dir in a definition again, duplicate it
+    // solely because nf refuses to use out_dir in a definition again, duplicate it
     def out_dir2 = check_params()
-    def ahrd_output = file("${out_dir2}/ahrd_output_file.csv")
-    if (!ahrd_output.exists()) {
-       run_ahrd(out_dir, ahrd_config)
-           .set {ahrd_output_ch}
+    def ahrd_output = file("${out_dir2}/").list().any { it.endsWith('hrd_merged.csv') } 
+    //def ahrd_output = file("${out_dir2}/ahrd_merged.csv").size() > 0
+
+    if (!ahrd_output) {
+        run_ahrd(out_dir, ahrd_configs)
+        .collect()
+        .set { ahrd_chunks }
+
+        merge_ahrd(out_dir, ahrd_chunks)
+        .set { ahrd_output_ch }
     }
     else{
-        println "ahrd_output_file.csv already exists. Delete from outdir if you wish to regenerate."
-        Channel.fromPath(ahrd_output)
+        log.warn("Merged AHRD result file already exists in out dir. Delete if you wish to regenerate it.")
+        Channel.fromPath("${out_dir}/ahrd_merged.csv")
             .set { ahrd_output_ch }
     }
+
     appendGOids(ahrd_output_ch, interproscan_output, out_dir)
         .set { appendedOut }
 
