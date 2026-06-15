@@ -1,28 +1,12 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 
-import groovy.json.JsonOutput
-
 params.chunksize = 500
 params.maximum_processes = 128
 params.threads = 4
 params.databases = ''
 params.gaf = ''
-if( !params.containsKey('desc_blacklist') ) {
-    params.desc_blacklist = '/resources/blacklist_descline.txt'
-}
-if( !params.containsKey('token_blacklist') ) {
-    params.token_blacklist = '/resources/blacklist_token.txt'
-}
-
-simul_processes = params.maximum_processes / params.threads
-diamond_processes = simul_processes / 2
-interpro_processes = simul_processes / 2
-
-assert params.input_fasta != ''
-assert params.outdir != ''
-assert !params.databases.isEmpty(), "No database/s provided"
-assert params.gaf != ''
+//params.desc_blacklist = params.desc_blacklist ?: '/resources/blacklist_descline.txt'
 
 def check_params() {
     if( params.remove('help') ) {
@@ -30,8 +14,9 @@ def check_params() {
         exit 0
     }
 
+    def out_dir = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
     if (!new File(params.outdir).isAbsolute()) {
-        out_dir = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
+        //def out_dir = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
         //def absoluteOutdir = new File(System.getenv('PWD'), params.outdir.toString()).getAbsolutePath()
         //params.outdir = absoluteOutdir
         println "INFO: outdir converted to absolute path: ${out_dir}"
@@ -43,7 +28,7 @@ def check_params() {
 
 def load_database_csv(String csv_path) {
     def file = new File(csv_path)
-    assert file.exists(), "CSV file '${csv_path}' does not exist."
+    assert file.exists() : "CSV file '${csv_path}' does not exist."
     
     def databases_map = [:]
     file.eachLine { line, index ->
@@ -58,8 +43,6 @@ def load_database_csv(String csv_path) {
 }
 
 process chunkFasta {
-    tag { fasta }
-
     input:
     path input_fasta
     path out_dir
@@ -75,8 +58,6 @@ process chunkFasta {
 }
 
 process sanitize_fasta {
-    tag "fasta sanitization"
-
     input:
     path myChunk
 
@@ -90,15 +71,13 @@ process sanitize_fasta {
 }
 
 process interproscan {
-    tag "interproscan"
+    maxForks params.interpro_processes
     
     input:
     tuple path(myChunk), path(out_dir)
 
     output:
     path "${out_dir}/interproscan_out/${myChunk}.raw"
-
-    maxForks interpro_processes
 
     script:
     """
@@ -122,8 +101,6 @@ process interproscan {
 }
 
 process concatenate_interproscan {
-    tag "concatenate raw ips files"
-
     input:
     path raw_files
     path out_dir
@@ -144,15 +121,11 @@ process checkOutputExists {
     output:
     tuple val(db_name), val(db_path_str), val(db_index_str), path("exists.txt")
 
-    exec: //Need this for stdout message since NF hides stderr it in work dir log and also doesn't show echos or prints for processes that successfully finish -_-
-    def checkFile = file("${outDir}/${db_name}_blasted.outfmt6.tsv").exists()
-    if (checkFile) {
-        log.warn("${outDir}/${db_name}_blasted.outfmt6.tsv already exists, will skip alignment to this database. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
-    }
     script:
     """
     if [ -f "${outDir}/${db_name}_blasted.outfmt6.tsv" ]; then
         echo "true" >> exists.txt
+        echo "${outDir}/${db_name}_blasted.outfmt6.tsv already exists, will skip alignment" >&2
     else
         echo "false" >> exists.txt
     fi
@@ -180,15 +153,14 @@ process checkInterProExists {
 }
 
 process alignChunks {
-    tag "diamond"
-
+    maxForks params.diamond_processes
+    
     input: 
     tuple path(myChunk), path(out_dir), val(database_name), val(database_index), val(database_path)
 
     output:
     tuple path("${out_dir}/diamond_out/${database_name}/${myChunk.baseName}.outfmt6.tsv"), val(database_name), val(database_path)
  
-    maxForks diamond_processes
 
     script:
     """
@@ -198,8 +170,6 @@ process alignChunks {
 }
 
 process concatenate_diamond_outputs {
-    tag "concat diamonds"
-
     input:
     tuple path(diamond_in), path(out_dir), val(database_name), val(database_path)
     
@@ -213,8 +183,6 @@ process concatenate_diamond_outputs {
 }
 
 process create_yaml {
-    tag "Generate yaml per fasta chunk"
-    
     input:
     tuple path(fasta), path(json_chunk)
     path out_dir
@@ -236,8 +204,6 @@ process create_yaml {
 }
 
 process run_ahrd{
-    tag "Run ahrd"
-
     input:
     each path(out_dir)
     path ahrd_config
@@ -256,8 +222,6 @@ process run_ahrd{
 }
 
 process merge_ahrd {
-    tag "merge ahrd configs"
-
     input:
     path out_dir
     path configs
@@ -278,8 +242,6 @@ process merge_ahrd {
 }
 
 process appendGOids {
-    tag "tack on GO ids associated with queries via IPS"
-    
     input:
     path ahrd_output
     path interpro_raw
@@ -332,13 +294,9 @@ process appendGOids {
     """
 }
 
-go_obo_file="/resources/go.obo"
-
 process create_GO_lookup {
-    tag "Create lookup table from hardcoded .obo"
-
     input:
-    //path go_obo_file
+    path go_obo_file
     path out_dir
 
     output:
@@ -371,8 +329,6 @@ process create_GO_lookup {
 }
 
 process description_for_hits {
-    tag "Insert descriptions for hit GO terms"
-
     input:
     path ahrd_output_with_go
     path go_lookup
@@ -413,9 +369,23 @@ process write_json {
 }
 
 workflow {
+    params.token_blacklist = params.token_blacklist ?: '/resources/blacklist_token.txt'
+    params.desc_blacklist = params.desc_blacklist ?: '/resources/blacklist_descline.txt'
+
+    def go_obo_file="/resources/go.obo"
+
+    def simul_processes = params.maximum_processes / params.threads
+    params.interpro_processes = (params.maximum_processes / params.threads / 2).intValue()
+    params.diamond_processes = (params.maximum_processes / params.threads / 2).intValue()
+
+    assert params.input_fasta != ''
+    assert params.outdir != ''
+    assert !params.databases.isEmpty(): "No database/s provided"
+    assert params.gaf != ''
+
     println "${simul_processes}"
     input_fasta = file(params.input_fasta) 
-    out_dir = check_params()
+    def out_dir = check_params()
 
     chunk_size = params.chunksize
     def databases_map = load_database_csv(params.databases)
@@ -460,6 +430,7 @@ workflow {
             .set { interproscan_input }
         //overwrite
         interproscan(interproscan_input)
+
             .collect()
             .set { interproscan_output }
 
@@ -512,7 +483,7 @@ workflow {
         .set { existsPart2 }
     
     existing_files
-        .join(existsPart2)
+        .combine(existsPart2, by: 0)
         .map { dbNames, dbPath, chunkId, chunkBlast ->
             tuple(chunkId, chunkBlast, dbNames, dbPath)
         //println "DEBUG - existDBpaths: ${dbPath}"
@@ -602,7 +573,7 @@ workflow {
     appendGOids(ahrd_output_ch, interproscan_output, out_dir)
         .set { appendedOut }
 
-    create_GO_lookup(out_dir)
+    create_GO_lookup(go_obo_file, out_dir)
         .set { go_lookup }
 
     description_for_hits(appendedOut, go_lookup, out_dir)
