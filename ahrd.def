@@ -1,6 +1,6 @@
 Bootstrap: docker
 
-From: python:3.11-slim-bullseye
+From: python:3.11-slim-bookworm
 
 %labels
     Author Evan
@@ -18,6 +18,7 @@ From: python:3.11-slim-bullseye
     #/home/elavelle/tmp_interproscan_build/nf_sandbox/usr/local/lib64/python3.9/site-packages/yaml /usr/local/lib64/python3.9/site-packages/yaml
 
 %post
+    echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid
     apt-get update && \
     apt-get install -y openjdk-17-jre-headless curl libgomp1 libc6-dev build-essential unzip perl zlib1g procps python3-yaml python3-pip && \
     apt-get clean
@@ -30,8 +31,8 @@ From: python:3.11-slim-bullseye
 
     # Nextflow
     cd /opt
-    curl -s https://get.nextflow.io | bash
-    chmod +x nextflow
+    #curl -s https://get.nextflow.io | bash
+    #chmod +x nextflow
     pip install biopython
     
     #IPS

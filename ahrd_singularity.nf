@@ -6,6 +6,8 @@ params.maximum_processes = 128
 params.threads = 4
 params.databases = ''
 params.gaf = ''
+params.gff = null
+
 //params.desc_blacklist = params.desc_blacklist ?: '/resources/blacklist_descline.txt'
 
 def check_params() {
@@ -77,7 +79,9 @@ process interproscan {
     tuple path(myChunk), path(out_dir)
 
     output:
-    path "${out_dir}/interproscan_out/${myChunk}.raw"
+    path "${out_dir}/interproscan_out/${myChunk}.raw", emit: raw
+    path "${out_dir}/interproscan_out/${myChunk}.gff3", emit: gff3
+    path "${out_dir}/interproscan_out/${myChunk}.xml", emit: xml
 
     script:
     """
@@ -86,7 +90,7 @@ process interproscan {
 
     mkdir -p ${out_dir}/interproscan_out
     mkdir -p ${out_dir}/interproscan_tmp
-    /opt/interproscan-5.72-103.0/interproscan.sh --disable-precalc -i $myChunk -f XML --goterms -o ${out_dir}/interproscan_out/${myChunk}.xml
+    /opt/interproscan-5.72-103.0/interproscan.sh --disable-precalc -i $myChunk -f XML,GFF3 --goterms -b ${out_dir}/interproscan_out/${myChunk}
     if [ -f "${out_dir}/interproscan_out/${myChunk}.raw" ]; then
         rm "${out_dir}/interproscan_out/${myChunk}.raw"
     fi
@@ -227,7 +231,7 @@ process merge_ahrd {
     path configs
 
     output:
-    path "${out_dir}/ahrd_merged.csv", emit: ahrd_out
+    path "${out_dir}/ahrd_merged.csv"
 
     script:
     """
@@ -368,6 +372,97 @@ process write_json {
     """
 }
 
+process add_ips {
+    
+    input:
+    path in_gff
+    path ips_raw
+    path out_dir
+
+    output:
+    path "${out_dir}/interproscan_updated"
+
+    script:
+    """
+    perl /bin/scripts/ipr_update.pl ${in_gff} ${ips_raw} > interproscan_updated
+    mv interproscan_updated ${out_dir}/interproscan_updated
+    """
+}
+
+process add_note {
+
+    input:
+    path gff
+    path ahrd_merged
+    path ips_updated
+    path out_dir2
+
+    output:
+    path "${out_dir2}/noted.gff3"
+
+    script:
+    """
+    echo "GFF: ${gff}" >&2
+    echo "AHRD: ${ahrd_merged}" >&2
+    echo "IPS: ${ips_updated}" >&2
+    echo "OUTDIR: ${out_dir2}" >&2    
+    grep '	mRNA	' ${gff} | awk -F'\t' '{n=split(\$9,a,";"); for(i=1;i<=n;i++){if(a[i]~/^ID=/){id=substr(a[i],4)}; if(a[i]~/^Parent=/){parent=substr(a[i],8)}}; print id"\t"parent}' > transcript2gene
+    cp transcript2gene ${out_dir2}/transcript2gene
+ 
+    /bin/scripts/clean_AHRD.sh ${out_dir2}/ahrd_merged.csv | /bin/scripts/substitute_gene_id_for_transcript_id.pl --transcript2gene ${out_dir2}/transcript2gene > ahrd_cleaned
+    
+    cp ahrd_cleaned ${out_dir2}/ahrd_cleaned
+
+    perl /bin/scripts/add_note_attr_inGFF.pl ahrd_cleaned ${ips_updated} | perl /bin/scripts/add_IDs.pl | perl /bin/scripts/sort_gff.pl > noted.gff3
+    cp noted.gff3 ${out_dir2}/noted.gff3
+    """
+}
+
+process merge_iprscan_gff {
+
+    input:
+    path gff3_chunks
+    path out_dir
+
+    output:
+    path "${out_dir}/iprscan.gff3"
+
+    script:
+    """
+    echo "##gff-version 3" > iprscan.gff3
+    for f in $gff3_chunks; do
+        awk '/^##FASTA/{exit} 
+        /^##gff-version/{next}
+        /^##feature-ontology/ {next}
+        /^##interproscan-version/{next}
+        {print}' "\$f"   
+    done >> iprscan.gff3
+
+    perl -i -pe 'BEGIN{\$count=0} if (/ID=match\\\$[0-9]+/) {\$count++; s/ID=match\\\$[0-9]+/ID=match\\\$\$count/;}' iprscan.gff3
+
+    # sort by seqid then start coordinate
+    (grep '^#' iprscan.gff3; grep -v '^#' iprscan.gff3 | sort -k1,1 -k4,4n) > iprscan.gff3.sorted
+    mv iprscan.gff3.sorted iprscan.gff3
+
+    cp iprscan.gff3 ${out_dir}/iprscan.gff3
+    """
+}
+
+process cleanup {
+    
+    input:
+    path noted_gff
+
+    script:
+    """
+    rm ahrd_cleaned
+    rm interproscan_updated
+    rm go_map
+    rm ahrd_with_go_ids.tsv
+    rm ahrd_merged
+    rm transcript2gene
+    """
+
 workflow {
     params.token_blacklist = params.token_blacklist ?: '/resources/blacklist_token.txt'
     params.desc_blacklist = params.desc_blacklist ?: '/resources/blacklist_descline.txt'
@@ -423,6 +518,7 @@ workflow {
         log.warn("${out_dir}/interproscan_concatenated.raw already exists, will skip interproscan. YOU DO NOT WANT THIS IF YOU ARE USING A NEW QUERY FASTA IN AN OLD OUTDIR-either delete the outdir before rerunning, or provide another.")
         // Create a channel with the existing file
         interproscan_output = Channel.value(file(interproscan_result))
+
     } else {
         // Run interproscan
         chunk_channel
@@ -431,10 +527,13 @@ workflow {
         //overwrite
         interproscan(interproscan_input)
 
+        interproscan.out.raw
             .collect()
-            .set { interproscan_output }
+            .set { interproscan_raw }
 
-        interproscan_file_ch = concatenate_interproscan(interproscan_output, out_dir)
+        interproscan_output = concatenate_interproscan(interproscan_raw, out_dir)
+
+        merge_iprscan_gff(interproscan.out.gff3.collect(), out_dir)
       }
 
     blast_input_channel = dbs_to_process
@@ -464,14 +563,6 @@ workflow {
     
     // Not strictly part of this pipeline, but creates files for the check if out_dir is reused
     concatenate_diamond_outputs(concat_input)
-        //set {new_concatenated_files}
-    //reunion
-    //def concatenated_files = existing_files.mix(new_concatenated_files)
- 
-    //concatenated_files
-        //.map { blast, db, path -> tuple(db, path) }
-        //.collect()
-        //.set { db_paths_list }
 
     // THIS WILL ONLY RUN ON EXISTING DATABASES (IT DOES NOT WAIT OR RUN IN SEQUENCE)
     Channel.fromPath("${out_dir}/diamond_out/*/*.outfmt6.tsv")
@@ -539,20 +630,9 @@ workflow {
     create_yaml(yaml_input_channel, out_dir, file(params.gaf).toAbsolutePath().toString(), file("/resources/interpro.xml"), params.desc_blacklist, params.token_blacklist, interproscan_output)
         .set { ahrd_configs }
 
-//    db_json_ch
-//        .map { db_json ->
-//            def dbs = new groovy.json.JsonSlurper().parseText(db_json)
-//            def unsupported = dbs.find { !(it.dbName in ['uniprot_sprot', 'uniprot_trembl', 'uniref90']) }
-//            if (unsupported) {
-//                println "Unsupported database: ${unsupported.dbName} \nUser will need to manually add the appropriate regex lines in the AHRD .yaml"
-//                System.exit(1)
-//            }
-//            db_json
-//        }
-//        .set { validated_db_json_ch }
-    
     // solely because nf refuses to use out_dir in a definition again, duplicate it
-    def out_dir2 = check_params()
+    def out_dir2 = out_dir
+
     def ahrd_output = file("${out_dir2}/").list().any { it.endsWith('hrd_merged.csv') } 
     //def ahrd_output = file("${out_dir2}/ahrd_merged.csv").size() > 0
 
@@ -577,4 +657,9 @@ workflow {
         .set { go_lookup }
 
     description_for_hits(appendedOut, go_lookup, out_dir)
+    add_ips(params.gff, interproscan_output, out_dir)
+        .set { ips_out }
+    def out_dir3 = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
+    add_note(params.gff, ahrd_output_ch, ips_out, out_dir3)
+    cleanup(add_note.out)
 }
