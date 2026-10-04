@@ -452,16 +452,18 @@ process cleanup {
     
     input:
     path noted_gff
+    path out_dir
 
     script:
     """
-    rm ahrd_cleaned
-    rm interproscan_updated
-    rm go_map
-    rm ahrd_with_go_ids.tsv
-    rm ahrd_merged
-    rm transcript2gene
+    rm ${out_dir}/ahrd_cleaned
+    rm ${out_dir}/interproscan_updated
+    rm ${out_dir}/go_map.tsv
+    rm ${out_dir}/ahrd_with_go_ids.tsv
+    rm ${out_dir}/ahrd_merged.csv
+    rm ${out_dir}/transcript2gene
     """
+}
 
 workflow {
     params.token_blacklist = params.token_blacklist ?: '/resources/blacklist_token.txt'
@@ -661,5 +663,5 @@ workflow {
         .set { ips_out }
     def out_dir3 = new File(System.getenv('PWD'), params.outdir).getAbsolutePath()
     add_note(params.gff, ahrd_output_ch, ips_out, out_dir3)
-    cleanup(add_note.out)
+    cleanup(add_note.out, out_dir3)
 }
